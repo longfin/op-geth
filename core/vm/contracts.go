@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/blake2b"
 	"github.com/ethereum/go-ethereum/crypto/bls12381"
 	"github.com/ethereum/go-ethereum/crypto/bn256"
+	"github.com/ethereum/go-ethereum/crypto/secp256r1"
 	"github.com/ethereum/go-ethereum/params"
 	"golang.org/x/crypto/ripemd160"
 )
@@ -79,15 +80,16 @@ var PrecompiledContractsIstanbul = map[common.Address]PrecompiledContract{
 // PrecompiledContractsBerlin contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
 var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{1}): &ecrecover{},
-	common.BytesToAddress([]byte{2}): &sha256hash{},
-	common.BytesToAddress([]byte{3}): &ripemd160hash{},
-	common.BytesToAddress([]byte{4}): &dataCopy{},
-	common.BytesToAddress([]byte{5}): &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{9}): &blake2F{},
+	common.BytesToAddress([]byte{1}):    &ecrecover{},
+	common.BytesToAddress([]byte{2}):    &sha256hash{},
+	common.BytesToAddress([]byte{3}):    &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):    &dataCopy{},
+	common.BytesToAddress([]byte{5}):    &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}):    &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):    &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):    &blake2F{},
+	common.BytesToAddress([]byte{19}):   &p256Verify{},
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
@@ -154,6 +156,37 @@ func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uin
 	output, err := p.Run(input)
 	return output, suppliedGas, err
 }
+
+type p256Verify struct{}
+
+// RequiredGas returns the gas required to execute the precompiled contract
+func (c *p256Verify) RequiredGas(input []byte) uint64 {
+	return 3456
+}
+
+// Run executes the precompiled contract, returning the output and the used gas
+func (c *p256Verify) Run(input []byte) ([]byte, error) {
+	// Required input length is 160 bytes
+	const p256VerifyInputLength = 160
+
+	// "input" is (hash, r, s, x, y), each 32 bytes
+	input = common.RightPadBytes(input, p256VerifyInputLength)
+
+	// Extract the hash, r, s, x, y from the input
+	hash := input[0:32]
+	r, s := new(big.Int).SetBytes(input[32:64]), new(big.Int).SetBytes(input[64:96])
+	x, y := new(big.Int).SetBytes(input[96:128]), new(big.Int).SetBytes(input[128:160])
+
+	// Verify the secp256r1 signature
+	if secp256r1.Verify(hash, r, s, x, y) {
+		// Signature is valid
+		return common.LeftPadBytes(common.Big1.Bytes(), 32), nil
+	} else {
+		// Signature is invalid
+		return nil, nil
+	}
+}
+
 
 // ECRECOVER implemented as a native contract.
 type ecrecover struct{}
